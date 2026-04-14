@@ -297,14 +297,13 @@ $cleanRemediation
         if (-not [string]::IsNullOrWhiteSpace($firstRow.azurePortalRecommendationLink)) {
             $portalRefSection = @"
 
-- [View recommendation in Azure Portal]($($firstRow.azurePortalRecommendationLink))
+[View recommendation in Azure Portal]($($firstRow.azurePortalRecommendationLink))
 "@
         }
 
         $descriptionMd = @"
 $descriptionText
 $remediationSection
-$portalRefSection
 "@
 
         # Separate rows by state
@@ -360,6 +359,7 @@ $title
 | Subscription | Resource Group | Resource Type | Resource | Status |
 | :----------- | :------------- | :------------ | :------- | :----- |
 $tableRows
+$portalRefSection
 "@
 
         $params = @{
