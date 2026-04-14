@@ -213,15 +213,12 @@ securityresources
     }
     #endregion Data Collection
 
-    #region Skip if no assessments
+    #region Assessment Logic
     if ($assessments.Count -eq 0) {
-        Write-PSFMessage 'No MDC assessments found. Defender for Cloud may not be enabled.' -Tag Test -Level Verbose
-        Add-ZtTestResultDetail -SkippedBecause NotApplicable -Result 'No Microsoft Defender for Cloud assessments found. Ensure Defender for Cloud is enabled on your subscriptions.'
+        Write-PSFMessage 'No MDC assessments found. Cloud Security Posture Management enabled.' -Tag Test -Level Verbose
+        Add-ZtTestResultDetail -SkippedBecause NotApplicable -Result 'No Microsoft Defender for Cloud assessments found. Ensure Cloud Security Posture Management is enabled on your subscriptions.'
         return
     }
-    #endregion Skip if no assessments
-
-    #region Process and group assessments by recommendationDisplayName
 
     # HTML-to-Markdown converter (defined once, used per group)
     $convertHtmlToMarkdown = {
@@ -373,7 +370,7 @@ $tableRows
         Add-ZtTestResultDetail @params
         $testIdCounter++
     }
-    #endregion Process and group assessments
+    #endregion Assessment Logic
 
     Write-PSFMessage "Emitted $($groups.Count) grouped MDC assessment test results (TestIds 50001-$($testIdCounter - 1))" -Tag Test -Level VeryVerbose
 }
