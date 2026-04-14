@@ -237,6 +237,8 @@ securityresources
         $md = $md -replace '<br\s*/?>', "`n"
         $md = $md -replace '</?p[^>]*>', "`n"
         $md = $md -replace '</?div[^>]*>', "`n"
+        $md = $md -replace '<(?:b|strong)[^>]*>([^<]*)</(?:b|strong)>', '**$1**'
+        $md = $md -replace '<(?:i|em)[^>]*>([^<]*)</(?:i|em)>', '*$1*'
         $md = $md -replace '<[^>]+>', ''
         $md = $md -replace '&amp;', '&'
         $md = $md -replace '&lt;', '<'
@@ -244,6 +246,10 @@ securityresources
         $md = $md -replace '&quot;', '"'
         $md = $md -replace '&#39;', "'"
         $md = $md -replace '&nbsp;', ' '
+        # Convert bare URLs (not already wrapped in a markdown link) → [url](url)
+        $md = [regex]::Replace($md, '(?<!\()(https?://[^\s<>"\[\]()]+?)([.,;]?)(?=\s|$)', '[${1}](${1})${2}')
+        # Break inline numbered steps onto separate lines: "text 2. Word" → "text\n2. Word"
+        $md = [regex]::Replace($md, '(?<=\S) (\d{1,2})\. ([A-Z])', "`n" + '$1. $2')
         $md = ($md -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }) -join "`n"
         return $md
     }
