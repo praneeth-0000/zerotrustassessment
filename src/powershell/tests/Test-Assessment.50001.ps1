@@ -29,8 +29,8 @@
 function Test-Assessment-50001 {
     [ZtTest(
         Category = 'Microsoft Defender for Cloud',
-        ImplementationCost = 'Medium',
-        MinimumLicense = ('Azure'),
+        ImplementationCost = 'Low',
+        MinimumLicense = ('N/A'),
         Pillar = 'Infrastructure',
         RiskLevel = 'High',
         Service = ('Azure'),
@@ -272,34 +272,7 @@ securityresources
         # Risk from severity
         $risk = if ($firstRow.severity -in 'High', 'Medium', 'Low') { $firstRow.severity } else { 'Medium' }
 
-        # Separate rows by state
-        $applicableRows = @($rows | Where-Object { $_.state -ne 'NotApplicable' })
-        $notApplicableRows = @($rows | Where-Object { $_.state -eq 'NotApplicable' })
-
-        # If all rows are NotApplicable → Skip
-        if ($applicableRows.Count -eq 0) {
-            $naReasons = ($notApplicableRows | ForEach-Object { $_.notApplicableReason } | Where-Object { $_ } | Select-Object -Unique) -join '; '
-            if ([string]::IsNullOrWhiteSpace($naReasons)) { $naReasons = 'All resources are not applicable for this recommendation.' }
-
-            $params = @{
-                TestId         = "$testIdCounter"
-                Title          = $title
-                SkippedBecause = 'NotApplicable'
-                Result         = $naReasons
-                Pillar         = 'Infrastructure'
-                Category       = $category
-                Risk           = $risk
-            }
-            Add-ZtTestResultDetail @params
-            $testIdCounter++
-            continue
-        }
-
-        # Any Unhealthy → Failed; all Healthy → Passed
-        $hasUnhealthy = @($applicableRows | Where-Object { $_.state -eq 'Unhealthy' }).Count -gt 0
-        $passed = -not $hasUnhealthy
-
-        # --- Build Description ("What was checked") ---
+        # --- Build Description ("What was checked") — shared by both skip and normal paths ---
         $descriptionText = & $convertHtmlToMarkdown $firstRow.description
         if ([string]::IsNullOrWhiteSpace($descriptionText)) {
             $descriptionText = $firstRow.displayName
@@ -330,6 +303,34 @@ $descriptionText
 $remediationSection
 $portalRefSection
 "@
+
+        # Separate rows by state
+        $applicableRows = @($rows | Where-Object { $_.state -ne 'NotApplicable' })
+        $notApplicableRows = @($rows | Where-Object { $_.state -eq 'NotApplicable' })
+
+        # If all rows are NotApplicable → Skip
+        if ($applicableRows.Count -eq 0) {
+            $naReasons = ($notApplicableRows | ForEach-Object { $_.notApplicableReason } | Where-Object { $_ } | Select-Object -Unique) -join '; '
+            if ([string]::IsNullOrWhiteSpace($naReasons)) { $naReasons = 'All resources are not applicable for this recommendation.' }
+
+            $params = @{
+                TestId         = "$testIdCounter"
+                Title          = $title
+                Description    = $descriptionMd
+                SkippedBecause = 'NotApplicable'
+                Result         = $naReasons
+                Pillar         = 'Infrastructure'
+                Category       = $category
+                Risk           = $risk
+            }
+            Add-ZtTestResultDetail @params
+            $testIdCounter++
+            continue
+        }
+
+        # Any Unhealthy → Failed; all Healthy → Passed
+        $hasUnhealthy = @($applicableRows | Where-Object { $_.state -eq 'Unhealthy' }).Count -gt 0
+        $passed = -not $hasUnhealthy
 
         # --- Build Result ("Test result") ---
         # Resource table with clickable links (exclude NotApplicable rows)
@@ -365,8 +366,6 @@ $tableRows
             Result             = $resultMd
             Description        = $descriptionMd
             Risk               = $risk
-            UserImpact         = 'Low'
-            ImplementationCost = 'Medium'
             Pillar             = 'Infrastructure'
             Category           = $category
         }
