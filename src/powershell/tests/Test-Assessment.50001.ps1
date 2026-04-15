@@ -255,14 +255,6 @@ $cleanRemediation
 "@
         }
 
-        $portalRefSection = ''
-        if (-not [string]::IsNullOrWhiteSpace($firstRow.azurePortalRecommendationLink)) {
-            $portalRefSection = @"
-
-[View recommendation in Azure Portal]($($firstRow.azurePortalRecommendationLink))
-"@
-        }
-
         $descriptionMd = @"
 $descriptionText
 $remediationSection
@@ -312,16 +304,19 @@ $remediationSection
 
             $stateIcon = if ($row.state -eq 'Healthy') { '✅' } else { '❌' }
 
-            $tableRows += "| $subMd | $rgSafe | $typeSafe | $resMd | $stateIcon |`n"
+            $portalLinkMd = if (-not [string]::IsNullOrWhiteSpace($row.azurePortalRecommendationLink)) {
+                "[Link]($($row.azurePortalRecommendationLink))"
+            } else { '' }
+
+            $tableRows += "| $subMd | $rgSafe | $typeSafe | $resMd | $stateIcon | $portalLinkMd |`n"
         }
 
         $resultMd = @"
 $title
 
-| Subscription | Resource Group | Resource Type | Resource | Status |
-| :----------- | :------------- | :------------ | :------- | :----- |
+| Subscription | Resource Group | Resource Type | Resource | Status | View recommendation in portal |
+| :----------- | :------------- | :------------ | :------- | :----- | :---------------------------- |
 $tableRows
-$portalRefSection
 "@
 
         $params = @{
