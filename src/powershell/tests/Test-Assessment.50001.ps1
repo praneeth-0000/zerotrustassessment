@@ -220,40 +220,6 @@ securityresources
         return
     }
 
-    # HTML-to-Markdown converter (defined once, used per group)
-    $convertHtmlToMarkdown = {
-        param([string]$html)
-        if ([string]::IsNullOrWhiteSpace($html)) { return $html }
-        $md = $html
-        $md = [regex]::Replace($md, '<a\s+[^>]*href="([^"]*)"[^>]*>([^<]*)</a>', '[$2]($1)')
-        $liCounter = [ref]0
-        $md = [regex]::Replace($md, '<li[^>]*>', {
-            $liCounter.Value++
-            "`n$($liCounter.Value). "
-        })
-        $md = $md -replace '</li>', ''
-        $md = $md -replace '<[ou]l[^>]*>', ''
-        $md = $md -replace '</[ou]l>', ''
-        $md = $md -replace '<br\s*/?>', "`n"
-        $md = $md -replace '</?p[^>]*>', "`n"
-        $md = $md -replace '</?div[^>]*>', "`n"
-        $md = $md -replace '<(?:b|strong)[^>]*>([^<]*)</(?:b|strong)>', '**$1**'
-        $md = $md -replace '<(?:i|em)[^>]*>([^<]*)</(?:i|em)>', '*$1*'
-        $md = $md -replace '<[^>]+>', ''
-        $md = $md -replace '&amp;', '&'
-        $md = $md -replace '&lt;', '<'
-        $md = $md -replace '&gt;', '>'
-        $md = $md -replace '&quot;', '"'
-        $md = $md -replace '&#39;', "'"
-        $md = $md -replace '&nbsp;', ' '
-        # Convert bare URLs (not already wrapped in a markdown link) → [url](url)
-        $md = [regex]::Replace($md, '(?<!\()(https?://[^\s<>"\[\]()]+?)([.,;]?)(?=\s|$)', '[${1}](${1})${2}')
-        # Break inline numbered steps onto separate lines: "text 2. Word" → "text\n2. Word"
-        $md = [regex]::Replace($md, '(?<=\S) (\d{1,2})\. ([A-Z])', "`n" + '$1. $2')
-        $md = ($md -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }) -join "`n"
-        return $md
-    }
-
     # Group assessments by recommendation display name
     $groups = $assessments | Group-Object -Property recommendationDisplayName
     $testIdCounter = 50001
@@ -264,26 +230,22 @@ securityresources
 
         # Title from recommendationDisplayName
         $title = $group.Name
-        if ([string]::IsNullOrWhiteSpace($title)) { $title = $firstRow.displayName }
 
         # Category from controls column
         $category = $firstRow.controls
-        if ([string]::IsNullOrWhiteSpace($category) -or $category -eq 'No Value') {
-            $category = 'Microsoft Defender for Cloud'
-        }
 
         # Risk from severity
-        $risk = if ($firstRow.severity -in 'High', 'Medium', 'Low') { $firstRow.severity } else { 'Medium' }
+        $risk = $firstRow.severity
 
         # --- Build Description ("What was checked") — shared by both skip and normal paths ---
-        $descriptionText = & $convertHtmlToMarkdown $firstRow.description
+        $descriptionText = ConvertTo-ZtMarkdown $firstRow.description
         if ([string]::IsNullOrWhiteSpace($descriptionText)) {
             $descriptionText = $firstRow.displayName
         }
 
         $remediationSection = ''
         if (-not [string]::IsNullOrWhiteSpace($firstRow.remediationSteps)) {
-            $cleanRemediation = & $convertHtmlToMarkdown $firstRow.remediationSteps
+            $cleanRemediation = ConvertTo-ZtMarkdown $firstRow.remediationSteps
 
             $remediationSection = @"
 
