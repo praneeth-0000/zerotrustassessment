@@ -465,7 +465,7 @@ export function DataTable<TData extends Test, TValue>({
                     <div className="grid pt-10 gap-6">
                         <Card>
                             <CardHeader>
-                                <div className="mt-2 grid grid-cols-3 gap-y-2 text-sm">
+                                <div className={`mt-2 text-sm ${selectedRow?.TestPillar === "Infrastructure" ? "flex flex-wrap gap-x-8 gap-y-2" : "grid grid-cols-3 gap-y-2"}`}>
                                     <div className="flex items-center gap-2">
                                         <AlertTriangle className="h-4 w-4 text-foreground" />
                                         <span className="font-semibold">Risk:</span>
