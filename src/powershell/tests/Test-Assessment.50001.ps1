@@ -266,17 +266,43 @@ $remediationSection
         $applicableRows = @($rows | Where-Object { $_.state -ne 'NotApplicable' })
         $notApplicableRows = @($rows | Where-Object { $_.state -eq 'NotApplicable' })
 
-        # If all rows are NotApplicable → Skip
+        # If all rows are NotApplicable → Skip (but still show resource table)
         if ($applicableRows.Count -eq 0) {
             $naReasons = ($notApplicableRows | ForEach-Object { $_.notApplicableReason } | Where-Object { $_ } | Select-Object -Unique) -join '; '
             if ([string]::IsNullOrWhiteSpace($naReasons)) { $naReasons = 'All resources are not applicable for this recommendation.' }
+
+            $naTableRows = ''
+            foreach ($row in $notApplicableRows | Sort-Object subscriptionName, resourceGroup, resourceName) {
+                $subLink = "https://portal.azure.com/#resource/subscriptions/$($row.subscriptionId)"
+                $subMd = "[$(Get-SafeMarkdown $row.subscriptionName)]($subLink)"
+
+                $rgSafe = $row.resourceGroup
+                $typeSafe = $row.resourceType
+
+                $resLink = "https://portal.azure.com/#resource$($row.resourceId)"
+                $resMd = "[$(Get-SafeMarkdown $row.resourceName)]($resLink)"
+
+                $portalLinkMd = if (-not [string]::IsNullOrWhiteSpace($row.azurePortalRecommendationLink)) {
+                    "[View recommendation]($($row.azurePortalRecommendationLink))"
+                } else { '' }
+
+                $naTableRows += "| $subMd | $rgSafe | $typeSafe | $resMd | N/A | $portalLinkMd |`n"
+            }
+
+            $naResultMd = @"
+$naReasons
+
+| Subscription | Resource group | Resource type | Affected resource | Status | Azure portal |
+| :----------- | :------------- | :------------ | :---------------- | :----- | :----------- |
+$naTableRows
+"@
 
             $params = @{
                 TestId         = $testId
                 Title          = $title
                 Description    = $descriptionMd
                 SkippedBecause = 'NotApplicable'
-                Result         = $naReasons
+                Result         = $naResultMd
                 Pillar         = 'Infrastructure'
                 Category       = $category
                 Risk           = $risk
