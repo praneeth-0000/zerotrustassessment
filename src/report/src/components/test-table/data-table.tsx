@@ -92,6 +92,13 @@ export function DataTable<TData extends Test, TValue>({
         return data;
     }, [data, pillar]);
 
+    // Default to High risk filter for Infrastructure pillar
+    React.useEffect(() => {
+        if (pillar === "Infrastructure" && pillarFilteredData.some(item => item.TestRisk === "High")) {
+            setSelectedRisks(["High"]);
+        }
+    }, [pillar, pillarFilteredData]);
+
     // Filter the data by pillar, selected SFI pillars, risks, and statuses if any are selected
     const filteredData = React.useMemo(() => {
         let result = pillarFilteredData;
