@@ -306,7 +306,7 @@ $remediationSection
             $stateIcon = if ($row.state -eq 'Healthy') { '✅' } else { '❌' }
 
             $portalLinkMd = if (-not [string]::IsNullOrWhiteSpace($row.azurePortalRecommendationLink)) {
-                "[Link]($($row.azurePortalRecommendationLink))"
+                "[View recommendation]($($row.azurePortalRecommendationLink))"
             } else { '' }
 
             $tableRows += "| $subMd | $rgSafe | $typeSafe | $resMd | $stateIcon | $portalLinkMd |`n"
@@ -315,8 +315,8 @@ $remediationSection
         $resultMd = @"
 $title
 
-| Subscription | Resource Group | Resource Type | Resource | Status | View recommendation in portal |
-| :----------- | :------------- | :------------ | :------- | :----- | :---------------------------- |
+| Subscription | Resource group | Resource type | Affected resource | Status | Azure portal |
+| :----------- | :------------- | :------------ | :---------------- | :----- | :----------- |
 $tableRows
 "@
 
