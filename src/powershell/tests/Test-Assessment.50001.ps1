@@ -293,7 +293,7 @@ $remediationSection
         # Resource table with clickable links (exclude NotApplicable rows)
 
         $tableRows = ''
-        foreach ($row in $applicableRows | Sort-Object subscriptionName, resourceGroup, resourceName) {
+        foreach ($row in $rows | Sort-Object subscriptionName, resourceGroup, resourceName) {
             $subLink = "https://portal.azure.com/#resource/subscriptions/$($row.subscriptionId)"
             $subMd = "[$(Get-SafeMarkdown $row.subscriptionName)]($subLink)"
 
@@ -303,7 +303,11 @@ $remediationSection
             $resLink = "https://portal.azure.com/#resource$($row.resourceId)"
             $resMd = "[$(Get-SafeMarkdown $row.resourceName)]($resLink)"
 
-            $stateIcon = if ($row.state -eq 'Healthy') { '✅' } else { '❌' }
+            $stateIcon = switch ($row.state) {
+                'Healthy'       { '✅' }
+                'NotApplicable' { 'N/A' }
+                default         { '❌' }
+            }
 
             $portalLinkMd = if (-not [string]::IsNullOrWhiteSpace($row.azurePortalRecommendationLink)) {
                 "[View recommendation]($($row.azurePortalRecommendationLink))"
