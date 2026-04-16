@@ -220,16 +220,18 @@ securityresources
         return
     }
 
-    # Group assessments by recommendation display name
-    $groups = $assessments | Group-Object -Property recommendationDisplayName
-    $testIdCounter = 50001
+    # Group assessments by recommendationName GUID (stable and unique per recommendation)
+    $groups = $assessments | Group-Object -Property recommendationName
 
     foreach ($group in $groups) {
         $rows = $group.Group
         $firstRow = $rows[0]
 
+        # TestId from recommendationName GUID
+        $testId = $group.Name
+
         # Title from recommendationDisplayName
-        $title = $group.Name
+        $title = $firstRow.recommendationDisplayName
 
         # Category from controls column
         $category = $firstRow.controls
@@ -270,7 +272,7 @@ $remediationSection
             if ([string]::IsNullOrWhiteSpace($naReasons)) { $naReasons = 'All resources are not applicable for this recommendation.' }
 
             $params = @{
-                TestId         = "$testIdCounter"
+                TestId         = $testId
                 Title          = $title
                 Description    = $descriptionMd
                 SkippedBecause = 'NotApplicable'
@@ -280,7 +282,6 @@ $remediationSection
                 Risk           = $risk
             }
             Add-ZtTestResultDetail @params
-            $testIdCounter++
             continue
         }
 
@@ -320,7 +321,7 @@ $tableRows
 "@
 
         $params = @{
-            TestId             = "$testIdCounter"
+            TestId             = $testId
             Title              = $title
             Status             = $passed
             Result             = $resultMd
@@ -331,9 +332,8 @@ $tableRows
         }
 
         Add-ZtTestResultDetail @params
-        $testIdCounter++
     }
     #endregion Assessment Logic
 
-    Write-PSFMessage "Emitted $($groups.Count) grouped MDC assessment test results (TestIds 50001-$($testIdCounter - 1))" -Tag Test -Level VeryVerbose
+    Write-PSFMessage "Emitted $($groups.Count) grouped MDC assessment test results" -Tag Test -Level VeryVerbose
 }
