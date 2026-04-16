@@ -309,6 +309,12 @@ export function DataTable<TData extends Test, TValue>({
                                 .filter(
                                     (column) => column.getCanHide()
                                 )
+                                .filter((column) => {
+                                    if (pillar === "Infrastructure") {
+                                        return !["TestImpact", "TestImplementationCost", "TestMinimumLicense"].includes(column.id);
+                                    }
+                                    return true;
+                                })
                                 .map((column) => {
                                     return (
                                         <DropdownMenuCheckboxItem
@@ -458,21 +464,26 @@ export function DataTable<TData extends Test, TValue>({
                                         <span className="font-semibold">Risk:</span>
                                         <span>{selectedRow?.TestRisk ?? "N/A"}</span>
                                     </div>
+                                    {selectedRow?.TestPillar !== "Infrastructure" && (
                                     <div className="flex items-center gap-2">
                                         <Users className="h-4 w-4 text-foreground" />
                                         <span className="font-semibold">User Impact:</span>
                                         <span>{selectedRow?.TestImpact ?? "N/A"}</span>
                                     </div>
+                                    )}
+                                    {selectedRow?.TestPillar !== "Infrastructure" && (
                                     <div className="flex items-center gap-2">
                                         <Settings className="h-4 w-4 text-foreground" />
                                         <span className="font-semibold">Implementation Effort:</span>
                                         <span>{selectedRow?.TestImplementationCost ?? "N/A"}</span>
                                     </div>
+                                    )}
                                     <div className="flex items-center gap-2">
                                         <Hash className="h-4 w-4 text-foreground" />
                                         <span className="font-semibold">Test ID:</span>
                                         <span>{selectedRow?.TestId ?? "N/A"}</span>
                                     </div>
+                                    {selectedRow?.TestPillar !== "Infrastructure" && (
                                     <div className="flex items-center gap-2">
                                         <BadgeCheck className="h-4 w-4 text-foreground" />
                                         <span className="font-semibold">License:</span>
@@ -488,6 +499,7 @@ export function DataTable<TData extends Test, TValue>({
                                             )}
                                         </div>
                                     </div>
+                                    )}
                                 </div>
                             </CardHeader>
                         </Card>
