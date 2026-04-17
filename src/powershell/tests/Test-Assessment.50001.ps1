@@ -266,6 +266,9 @@ $remediationSection
         $applicableRows = @($rows | Where-Object { $_.state -ne 'NotApplicable' })
         $notApplicableRows = @($rows | Where-Object { $_.state -eq 'NotApplicable' })
 
+        # Determine whether Resource group / Resource type columns have any data
+        $showRgType = @($rows | Where-Object { -not [string]::IsNullOrWhiteSpace($_.resourceGroup) -or -not [string]::IsNullOrWhiteSpace($_.resourceType) }).Count -gt 0
+
         # If all rows are NotApplicable → Skip (but still show resource table)
         if ($applicableRows.Count -eq 0) {
             $naReasons = ($notApplicableRows | ForEach-Object { $_.notApplicableReason } | Where-Object { $_ } | Select-Object -Unique) -join '; '
@@ -276,9 +279,6 @@ $remediationSection
                 $subLink = "https://portal.azure.com/#resource/subscriptions/$($row.subscriptionId)"
                 $subMd = "[$(Get-SafeMarkdown $row.subscriptionName)]($subLink)"
 
-                $rgSafe = $row.resourceGroup
-                $typeSafe = $row.resourceType
-
                 $resLink = "https://portal.azure.com/#resource$($row.resourceId)"
                 $resMd = "[$(Get-SafeMarkdown $row.resourceName)]($resLink)"
 
@@ -286,16 +286,30 @@ $remediationSection
                     "[View recommendation]($($row.azurePortalRecommendationLink))"
                 } else { '' }
 
-                $naTableRows += "| $subMd | $rgSafe | $typeSafe | $resMd | N/A | $portalLinkMd |`n"
+                if ($showRgType) {
+                    $naTableRows += "| $subMd | $($row.resourceGroup) | $($row.resourceType) | $resMd | N/A | $portalLinkMd |`n"
+                } else {
+                    $naTableRows += "| $subMd | $resMd | N/A | $portalLinkMd |`n"
+                }
             }
 
-            $naResultMd = @"
+            if ($showRgType) {
+                $naResultMd = @"
 $naReasons
 
 | Subscription | Resource group | Resource type | Affected resource | Status | Azure portal |
 | :----------- | :------------- | :------------ | :---------------- | :----- | :----------- |
 $naTableRows
 "@
+            } else {
+                $naResultMd = @"
+$naReasons
+
+| Subscription | Affected resource | Status | Azure portal |
+| :----------- | :---------------- | :----- | :----------- |
+$naTableRows
+"@
+            }
 
             $params = @{
                 TestId         = $testId
@@ -323,9 +337,6 @@ $naTableRows
             $subLink = "https://portal.azure.com/#resource/subscriptions/$($row.subscriptionId)"
             $subMd = "[$(Get-SafeMarkdown $row.subscriptionName)]($subLink)"
 
-            $rgSafe = $row.resourceGroup
-            $typeSafe = $row.resourceType
-
             $resLink = "https://portal.azure.com/#resource$($row.resourceId)"
             $resMd = "[$(Get-SafeMarkdown $row.resourceName)]($resLink)"
 
@@ -339,16 +350,30 @@ $naTableRows
                 "[View recommendation]($($row.azurePortalRecommendationLink))"
             } else { '' }
 
-            $tableRows += "| $subMd | $rgSafe | $typeSafe | $resMd | $stateIcon | $portalLinkMd |`n"
+            if ($showRgType) {
+                $tableRows += "| $subMd | $($row.resourceGroup) | $($row.resourceType) | $resMd | $stateIcon | $portalLinkMd |`n"
+            } else {
+                $tableRows += "| $subMd | $resMd | $stateIcon | $portalLinkMd |`n"
+            }
         }
 
-        $resultMd = @"
+        if ($showRgType) {
+            $resultMd = @"
 $title
 
 | Subscription | Resource group | Resource type | Affected resource | Status | Azure portal |
 | :----------- | :------------- | :------------ | :---------------- | :----- | :----------- |
 $tableRows
 "@
+        } else {
+            $resultMd = @"
+$title
+
+| Subscription | Affected resource | Status | Azure portal |
+| :----------- | :---------------- | :----- | :----------- |
+$tableRows
+"@
+        }
 
         $params = @{
             TestId             = $testId
