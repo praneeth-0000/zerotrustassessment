@@ -213,7 +213,7 @@ securityresources
     }
     #endregion Data Collection
 
-    #region Assessment Logic
+    #region Report Generation
     if ($assessments.Count -eq 0) {
         Write-PSFMessage 'No MDC assessments found. Cloud Security Posture Management enabled.' -Tag Test -Level Verbose
         Add-ZtTestResultDetail -SkippedBecause NotApplicable -Result 'No Microsoft Defender for Cloud assessments found. Ensure Cloud Security Posture Management is enabled on your subscriptions.'
@@ -222,6 +222,11 @@ securityresources
 
     # Group assessments by recommendationName GUID (stable and unique per recommendation)
     $groups = $assessments | Group-Object -Property recommendationName
+
+    # Pre-register each recommendation as a Pending worker in the progress dashboard
+    foreach ($g in $groups) {
+        Update-ZtProgressState -WorkerId $g.Name -WorkerName $g.Group[0].recommendationDisplayName -WorkerStatus 'Pending'
+    }
 
     foreach ($group in $groups) {
         $rows = $group.Group
@@ -239,22 +244,25 @@ securityresources
         # Risk from severity
         $risk = $firstRow.severity
 
-        # --- Build Description ("What was checked") — shared by both skip and normal paths ---
+        Update-ZtProgressState -WorkerId $testId -WorkerName $title -WorkerStatus 'Running' -WorkerDetail 'Building report...'
+
+        # --- Build "What was checked" section ---
         $descriptionText = ConvertTo-ZtMarkdown $firstRow.description
         if ([string]::IsNullOrWhiteSpace($descriptionText)) {
-            $descriptionText = $firstRow.displayName
+            $descriptionText = $firstRow.recommendationDisplayName
         }
 
         $remediationSection = ''
         if (-not [string]::IsNullOrWhiteSpace($firstRow.remediationSteps)) {
             $cleanRemediation = ConvertTo-ZtMarkdown $firstRow.remediationSteps
-
-            $remediationSection = @"
+            if (-not [string]::IsNullOrWhiteSpace($cleanRemediation)) {
+                $remediationSection = @"
 
 **Remediation action**
 
 $cleanRemediation
 "@
+            }
         }
 
         $descriptionMd = @"
@@ -266,50 +274,53 @@ $remediationSection
         $applicableRows = @($rows | Where-Object { $_.state -ne 'NotApplicable' })
         $notApplicableRows = @($rows | Where-Object { $_.state -eq 'NotApplicable' })
 
-        # Determine whether Resource group / Resource type columns have any data
-        $showRgType = @($rows | Where-Object { -not [string]::IsNullOrWhiteSpace($_.resourceGroup) -or -not [string]::IsNullOrWhiteSpace($_.resourceType) }).Count -gt 0
+        # --- Per-column presence flags (any non-empty value across the group → show that column) ---
+        # Note: Subscription and Azure portal columns are always present (guaranteed by KQL joins)
+        $showResourceGroup = [bool]($rows | Where-Object { -not [string]::IsNullOrWhiteSpace($_.resourceGroup) } | Select-Object -First 1)
+        $showResourceType  = [bool]($rows | Where-Object { -not [string]::IsNullOrWhiteSpace($_.resourceType) } | Select-Object -First 1)
+        $showResource      = [bool]($rows | Where-Object { -not [string]::IsNullOrWhiteSpace($_.resourceName) } | Select-Object -First 1)
+
+        # --- Build dynamic table header and separator from active columns ---
+        $tableHeader = '|'
+        $tableSep    = '|'
+        $tableHeader += ' Subscription |';  $tableSep += ' :----------- |'
+        if ($showResourceGroup) { $tableHeader += ' Resource group |'; $tableSep += ' :------------- |' }
+        if ($showResourceType)  { $tableHeader += ' Resource type |'; $tableSep += ' :------------ |' }
+        if ($showResource)      { $tableHeader += ' Affected resource |'; $tableSep += ' :---------------- |' }
+        $tableHeader += ' Status |'
+        $tableSep    += ' :----- |'
+        $tableHeader += ' Azure portal |';  $tableSep += ' :----------- |'
+        $tableHeaderMd = "$tableHeader`n$tableSep"
 
         # If all rows are NotApplicable → Skip (but still show resource table)
         if ($applicableRows.Count -eq 0) {
             $naReasons = ($notApplicableRows | ForEach-Object { $_.notApplicableReason } | Where-Object { $_ } | Select-Object -Unique) -join '; '
-            if ([string]::IsNullOrWhiteSpace($naReasons)) { $naReasons = 'All resources are not applicable for this recommendation.' }
 
-            $naTableRows = ''
-            foreach ($row in $notApplicableRows | Sort-Object subscriptionName, resourceGroup, resourceName) {
+            $naTableRows = @(foreach ($row in $notApplicableRows | Sort-Object subscriptionName, resourceGroup, resourceName) {
                 $subLink = "https://portal.azure.com/#resource/subscriptions/$($row.subscriptionId)"
-                $subMd = "[$(Get-SafeMarkdown $row.subscriptionName)]($subLink)"
-
+                $subMd   = "[$(Get-SafeMarkdown $row.subscriptionName)]($subLink)"
                 $resLink = "https://portal.azure.com/#resource$($row.resourceId)"
-                $resMd = "[$(Get-SafeMarkdown $row.resourceName)]($resLink)"
-
+                $resMd   = "[$(Get-SafeMarkdown $row.resourceName)]($resLink)"
                 $portalLinkMd = if (-not [string]::IsNullOrWhiteSpace($row.azurePortalRecommendationLink)) {
                     "[View recommendation]($($row.azurePortalRecommendationLink))"
                 } else { '' }
 
-                if ($showRgType) {
-                    $naTableRows += "| $subMd | $($row.resourceGroup) | $($row.resourceType) | $resMd | N/A | $portalLinkMd |`n"
-                } else {
-                    $naTableRows += "| $subMd | $resMd | N/A | $portalLinkMd |`n"
-                }
-            }
+                $rowMd = '|'
+                $rowMd += " $subMd |"
+                if ($showResourceGroup) { $rowMd += " $($row.resourceGroup) |" }
+                if ($showResourceType)  { $rowMd += " $($row.resourceType) |" }
+                if ($showResource)      { $rowMd += " $resMd |" }
+                $rowMd += ' N/A |'
+                $rowMd += " $portalLinkMd |"
+                "$rowMd`n"
+            }) -join ''
 
-            if ($showRgType) {
-                $naResultMd = @"
+            $naResultMd = @"
 $naReasons
 
-| Subscription | Resource group | Resource type | Affected resource | Status | Azure portal |
-| :----------- | :------------- | :------------ | :---------------- | :----- | :----------- |
+$tableHeaderMd
 $naTableRows
 "@
-            } else {
-                $naResultMd = @"
-$naReasons
-
-| Subscription | Affected resource | Status | Azure portal |
-| :----------- | :---------------- | :----- | :----------- |
-$naTableRows
-"@
-            }
 
             $params = @{
                 TestId         = $testId
@@ -322,6 +333,7 @@ $naTableRows
                 Risk           = $risk
             }
             Add-ZtTestResultDetail @params
+            Update-ZtProgressState -WorkerId $testId -WorkerName $title -WorkerStatus 'Done'
             continue
         }
 
@@ -329,66 +341,55 @@ $naTableRows
         $hasUnhealthy = @($applicableRows | Where-Object { $_.state -eq 'Unhealthy' }).Count -gt 0
         $passed = -not $hasUnhealthy
 
-        # --- Build Result ("Test result") ---
-        # Resource table with clickable links (exclude NotApplicable rows)
-
-        $tableRows = ''
-        foreach ($row in $rows | Sort-Object subscriptionName, resourceGroup, resourceName) {
+        # --- Build Result table ---
+        $tableRows = @(foreach ($row in $rows | Sort-Object subscriptionName, resourceGroup, resourceName) {
             $subLink = "https://portal.azure.com/#resource/subscriptions/$($row.subscriptionId)"
-            $subMd = "[$(Get-SafeMarkdown $row.subscriptionName)]($subLink)"
-
+            $subMd   = "[$(Get-SafeMarkdown $row.subscriptionName)]($subLink)"
             $resLink = "https://portal.azure.com/#resource$($row.resourceId)"
-            $resMd = "[$(Get-SafeMarkdown $row.resourceName)]($resLink)"
+            $resMd   = "[$(Get-SafeMarkdown $row.resourceName)]($resLink)"
 
             $stateIcon = switch ($row.state) {
-                'Healthy'       { '✅' }
-                'NotApplicable' { 'N/A' }
-                default         { '❌' }
+                'Healthy'   { '✅' }
+                'Unhealthy' { '❌' }
+                default     { 'N/A' }
             }
 
             $portalLinkMd = if (-not [string]::IsNullOrWhiteSpace($row.azurePortalRecommendationLink)) {
                 "[View recommendation]($($row.azurePortalRecommendationLink))"
             } else { '' }
 
-            if ($showRgType) {
-                $tableRows += "| $subMd | $($row.resourceGroup) | $($row.resourceType) | $resMd | $stateIcon | $portalLinkMd |`n"
-            } else {
-                $tableRows += "| $subMd | $resMd | $stateIcon | $portalLinkMd |`n"
-            }
-        }
+            $rowMd = '|'
+            $rowMd += " $subMd |"
+            if ($showResourceGroup) { $rowMd += " $($row.resourceGroup) |" }
+            if ($showResourceType)  { $rowMd += " $($row.resourceType) |" }
+            if ($showResource)      { $rowMd += " $resMd |" }
+            $rowMd += " $stateIcon |"
+            $rowMd += " $portalLinkMd |"
+            "$rowMd`n"
+        }) -join ''
 
-        if ($showRgType) {
-            $resultMd = @"
+        $resultMd = @"
 $title
 
-| Subscription | Resource group | Resource type | Affected resource | Status | Azure portal |
-| :----------- | :------------- | :------------ | :---------------- | :----- | :----------- |
+$tableHeaderMd
 $tableRows
 "@
-        } else {
-            $resultMd = @"
-$title
-
-| Subscription | Affected resource | Status | Azure portal |
-| :----------- | :---------------- | :----- | :----------- |
-$tableRows
-"@
-        }
 
         $params = @{
-            TestId             = $testId
-            Title              = $title
-            Status             = $passed
-            Result             = $resultMd
-            Description        = $descriptionMd
-            Risk               = $risk
-            Pillar             = 'Infrastructure'
-            Category           = $category
+            TestId      = $testId
+            Title       = $title
+            Status      = $passed
+            Result      = $resultMd
+            Description = $descriptionMd
+            Risk        = $risk
+            Pillar      = 'Infrastructure'
+            Category    = $category
         }
 
         Add-ZtTestResultDetail @params
+        Update-ZtProgressState -WorkerId $testId -WorkerName $title -WorkerStatus 'Done'
     }
-    #endregion Assessment Logic
+    #endregion Report Generation
 
     Write-PSFMessage "Emitted $($groups.Count) grouped MDC assessment test results" -Tag Test -Level VeryVerbose
 }

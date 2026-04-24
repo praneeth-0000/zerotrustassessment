@@ -154,7 +154,7 @@ securityresources
     }
     #endregion Data Collection
 
-    #region Assessment Logic
+    #region Report Generation
     if ($assessments.Count -eq 0) {
         Write-PSFMessage 'No MCSB assessments found. Ensure Microsoft Cloud Security Benchmark is enabled.' -Tag Test -Level Verbose
         Add-ZtTestResultDetail -SkippedBecause NotApplicable -Result 'No Microsoft Cloud Security Benchmark assessments found. Ensure the MCSB compliance standard is enabled in Defender for Cloud.'
@@ -179,6 +179,11 @@ securityresources
         'GS' = 'Governance and Strategy'
     }
 
+    # Pre-register each recommendation as a Pending worker in the progress dashboard
+    foreach ($g in $groups) {
+        Update-ZtProgressState -WorkerId "50002-$($g.Name)" -WorkerName $g.Group[0].recommendationDisplayName -WorkerStatus 'Pending'
+    }
+
     foreach ($group in $groups) {
         $rows = $group.Group
         $firstRow = $rows[0]
@@ -196,7 +201,9 @@ securityresources
 
         $risk = $firstRow.severity
 
-        # --- Build Description ---
+        Update-ZtProgressState -WorkerId $testId -WorkerName $title -WorkerStatus 'Running' -WorkerDetail 'Building report...'
+
+        # --- Build "What was checked" section ---
         $descriptionText = ConvertTo-ZtMarkdown $firstRow.description
         if ([string]::IsNullOrWhiteSpace($descriptionText)) {
             $descriptionText = $firstRow.recommendationDisplayName
@@ -205,12 +212,14 @@ securityresources
         $remediationSection = ''
         if (-not [string]::IsNullOrWhiteSpace($firstRow.remediationSteps)) {
             $cleanRemediation = ConvertTo-ZtMarkdown $firstRow.remediationSteps
-            $remediationSection = @"
+            if (-not [string]::IsNullOrWhiteSpace($cleanRemediation)) {
+                $remediationSection = @"
 
 **Remediation action**
 
 $cleanRemediation
 "@
+            }
         }
 
         $descriptionMd = @"
@@ -222,50 +231,57 @@ $remediationSection
         $applicableRows    = @($rows | Where-Object { $_.resourceState -ne 'notapplicable' })
         $notApplicableRows = @($rows | Where-Object { $_.resourceState -eq 'notapplicable' })
 
-        # Determine whether Resource group / Resource type columns have any data
-        $showRgType = @($rows | Where-Object { -not [string]::IsNullOrWhiteSpace($_.resourceGroup) -or -not [string]::IsNullOrWhiteSpace($_.resourceType) }).Count -gt 0
+        # --- Per-column presence flags (any non-empty value across the group → show that column) ---
+        # Note: Subscription, MCSB control, MCSB control name, and Azure portal columns are always present
+        $showResourceGroup = [bool]($rows | Where-Object { -not [string]::IsNullOrWhiteSpace($_.resourceGroup) } | Select-Object -First 1)
+        $showResourceType  = [bool]($rows | Where-Object { -not [string]::IsNullOrWhiteSpace($_.resourceType) } | Select-Object -First 1)
+        $showResource      = [bool]($rows | Where-Object { -not [string]::IsNullOrWhiteSpace($_.resourceName) } | Select-Object -First 1)
+
+        # --- Build dynamic table header and separator from active columns ---
+        $tableHeader = '|'
+        $tableSep    = '|'
+        $tableHeader += ' Subscription |'; $tableSep += ' :----------- |'
+        if ($showResourceGroup) { $tableHeader += ' Resource group |'; $tableSep += ' :------------- |' }
+        if ($showResourceType)  { $tableHeader += ' Resource type |'; $tableSep += ' :------------ |' }
+        $tableHeader += ' MCSB control |';       $tableSep += ' :----------- |'
+        $tableHeader += ' MCSB control name |';  $tableSep += ' :---------------- |'
+        if ($showResource)      { $tableHeader += ' Affected resource |'; $tableSep += ' :---------------- |' }
+        $tableHeader += ' Status |'
+        $tableSep    += ' :----- |'
+        $tableHeader += ' Azure portal |'; $tableSep += ' :----------- |'
+        $tableHeaderMd = "$tableHeader`n$tableSep"
 
         # If all rows are notapplicable → Skip
         if ($applicableRows.Count -eq 0) {
             $naReasons = ($notApplicableRows | ForEach-Object { $_.notApplicableReason } | Where-Object { $_ } | Select-Object -Unique) -join '; '
-            if ([string]::IsNullOrWhiteSpace($naReasons)) { $naReasons = 'All resources are not applicable for this recommendation.' }
 
-            $naTableRows = ''
-            foreach ($row in $notApplicableRows | Sort-Object subscriptionName, complianceControl, resourceGroup, resourceName) {
+            $naTableRows = @(foreach ($row in $notApplicableRows | Sort-Object subscriptionName, complianceControl, resourceGroup, resourceName) {
                 $subLink = "https://portal.azure.com/#resource/subscriptions/$($row.subscriptionId)"
-                $subMd = "[$(Get-SafeMarkdown $row.subscriptionName)]($subLink)"
-
+                $subMd   = "[$(Get-SafeMarkdown $row.subscriptionName)]($subLink)"
                 $resLink = "https://portal.azure.com/#resource$($row.resourceId)"
-                $resMd = "[$(Get-SafeMarkdown $row.resourceName)]($resLink)"
-
+                $resMd   = "[$(Get-SafeMarkdown $row.resourceName)]($resLink)"
                 $portalLinkMd = if (-not [string]::IsNullOrWhiteSpace($row.azurePortalRecommendationLink)) {
                     "[View recommendation]($($row.azurePortalRecommendationLink))"
                 } else { '' }
 
-                if ($showRgType) {
-                    $naTableRows += "| $subMd | $($row.resourceGroup) | $($row.resourceType) | $($row.complianceControl) | $($row.complianceControlName) | $resMd | N/A | $portalLinkMd |`n"
-                } else {
-                    $naTableRows += "| $subMd | $($row.complianceControl) | $($row.complianceControlName) | $resMd | N/A | $portalLinkMd |`n"
-                }
-            }
+                $rowMd = '|'
+                $rowMd += " $subMd |"
+                if ($showResourceGroup) { $rowMd += " $($row.resourceGroup) |" }
+                if ($showResourceType)  { $rowMd += " $($row.resourceType) |" }
+                $rowMd += " $($row.complianceControl) |"
+                $rowMd += " $($row.complianceControlName) |"
+                if ($showResource)      { $rowMd += " $resMd |" }
+                $rowMd += ' N/A |'
+                $rowMd += " $portalLinkMd |"
+                "$rowMd`n"
+            }) -join ''
 
-            if ($showRgType) {
-                $naResultMd = @"
+            $naResultMd = @"
 $naReasons
 
-| Subscription | Resource group | Resource type | MCSB control | MCSB control name | Affected resource | Status | Azure portal |
-| :----------- | :------------- | :------------ | :----------- | :---------------- | :---------------- | :----- | :----------- |
+$tableHeaderMd
 $naTableRows
 "@
-            } else {
-                $naResultMd = @"
-$naReasons
-
-| Subscription | MCSB control | MCSB control name | Affected resource | Status | Azure portal |
-| :----------- | :----------- | :---------------- | :---------------- | :----- | :----------- |
-$naTableRows
-"@
-            }
 
             $params = @{
                 TestId         = $testId
@@ -278,6 +294,7 @@ $naTableRows
                 Risk           = $risk
             }
             Add-ZtTestResultDetail @params
+            Update-ZtProgressState -WorkerId $testId -WorkerName $title -WorkerStatus 'Done'
             continue
         }
 
@@ -286,48 +303,40 @@ $naTableRows
         $passed = -not $hasUnhealthy
 
         # --- Build Result table ---
-        $tableRows = ''
-        foreach ($row in $rows | Sort-Object subscriptionName, complianceControl, resourceGroup, resourceName) {
+        $tableRows = @(foreach ($row in $rows | Sort-Object subscriptionName, complianceControl, resourceGroup, resourceName) {
             $subLink = "https://portal.azure.com/#resource/subscriptions/$($row.subscriptionId)"
-            $subMd = "[$(Get-SafeMarkdown $row.subscriptionName)]($subLink)"
-
+            $subMd   = "[$(Get-SafeMarkdown $row.subscriptionName)]($subLink)"
             $resLink = "https://portal.azure.com/#resource$($row.resourceId)"
-            $resMd = "[$(Get-SafeMarkdown $row.resourceName)]($resLink)"
+            $resMd   = "[$(Get-SafeMarkdown $row.resourceName)]($resLink)"
 
             $stateIcon = switch ($row.resourceState) {
                 'healthy'       { '✅' }
-                'notapplicable' { 'N/A' }
-                default         { '❌' }
+                'unhealthy'     { '❌' }
+                default         { 'N/A' }
             }
 
             $portalLinkMd = if (-not [string]::IsNullOrWhiteSpace($row.azurePortalRecommendationLink)) {
                 "[View recommendation]($($row.azurePortalRecommendationLink))"
             } else { '' }
 
-            if ($showRgType) {
-                $tableRows += "| $subMd | $($row.resourceGroup) | $($row.resourceType) | $($row.complianceControl) | $($row.complianceControlName) | $resMd | $stateIcon | $portalLinkMd |`n"
-            } else {
-                $tableRows += "| $subMd | $($row.complianceControl) | $($row.complianceControlName) | $resMd | $stateIcon | $portalLinkMd |`n"
-            }
-        }
+            $rowMd = '|'
+            $rowMd += " $subMd |"
+            if ($showResourceGroup) { $rowMd += " $($row.resourceGroup) |" }
+            if ($showResourceType)  { $rowMd += " $($row.resourceType) |" }
+            $rowMd += " $($row.complianceControl) |"
+            $rowMd += " $($row.complianceControlName) |"
+            if ($showResource)      { $rowMd += " $resMd |" }
+            $rowMd += " $stateIcon |"
+            $rowMd += " $portalLinkMd |"
+            "$rowMd`n"
+        }) -join ''
 
-        if ($showRgType) {
-            $resultMd = @"
+        $resultMd = @"
 $title
 
-| Subscription | Resource group | Resource type | MCSB control | MCSB control name | Affected resource | Status | Azure portal |
-| :----------- | :------------- | :------------ | :----------- | :---------------- | :---------------- | :----- | :----------- |
+$tableHeaderMd
 $tableRows
 "@
-        } else {
-            $resultMd = @"
-$title
-
-| Subscription | MCSB control | MCSB control name | Affected resource | Status | Azure portal |
-| :----------- | :----------- | :---------------- | :---------------- | :----- | :----------- |
-$tableRows
-"@
-        }
 
         $params = @{
             TestId      = $testId
@@ -341,8 +350,9 @@ $tableRows
         }
 
         Add-ZtTestResultDetail @params
+        Update-ZtProgressState -WorkerId $testId -WorkerName $title -WorkerStatus 'Done'
     }
-    #endregion Assessment Logic
+    #endregion Report Generation
 
     Write-PSFMessage "Emitted $($groups.Count) grouped MCSB assessment test results" -Tag Test -Level VeryVerbose
 }
